@@ -21,7 +21,7 @@
   <img src="imgs/FDIN.png" width="800"/>
 </p>
 
-## Results
+## Results Table
 Experiments are performed for different stereo image processing tasks including, stereo image low-light enhancement, rain streak removal, raindrop removal, and super-resolution. 
 
 <details>
