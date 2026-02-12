@@ -105,15 +105,15 @@ Training and Testing instructions for Deraining, Motion Deblurring, Defocus Debl
 ## :book: Citation
 If our work is helpful to your research, please cite our paper following this.
 
-@ARTICLE{11370448,
-  author={Tian, Xianmin and Xie, Jin and Xu, Ronghua and Nie, Jing and Cao, Jiale and Pang, Yanwei and Li, Xuelong},
-  journal={IEEE Transactions on Image Processing}, 
-  title={Frequency-Decomposed Interaction Network for Stereo Image Restoration}, 
-  year={2026},
-  volume={35},
-  pages={1462-1477},
-  doi={10.1109/TIP.2026.3658219}
-  }
+    @ARTICLE{11370448,
+      author={Tian, Xianmin and Xie, Jin and Xu, Ronghua and Nie, Jing and Cao, Jiale and Pang, Yanwei and Li, Xuelong},
+      journal={IEEE Transactions on Image Processing}, 
+      title={Frequency-Decomposed Interaction Network for Stereo Image Restoration}, 
+      year={2026},
+      volume={35},
+      pages={1462-1477},
+      doi={10.1109/TIP.2026.3658219}
+      }
 
 
 ## :postbox: Contact
