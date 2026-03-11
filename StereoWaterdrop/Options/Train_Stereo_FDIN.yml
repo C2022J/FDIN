@@ -1,0 +1,145 @@
+name: FDIN_Stereo_L_KITTI2015_0.6_3
+model_type: StereoImageCleanModel
+scale: 1
+num_gpu: 2
+manual_seed: 100
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: TrainSet
+    type: Dataset_PairedStereoImage
+#    dataroot_gt: data/StereoWaterdrop/train/gt/left
+#    dataroot_lq: data/StereoWaterdrop/train/low/left
+#    dataroot_gt: data/holopix50/train/gt/left
+#    dataroot_lq: data/holopix50/train/low/left
+#    dataroot_gt: data/Middlebury/train/gt/left
+#    dataroot_lq: data/Middlebury/train/low/left
+    dataroot_gt: ../stereo-derain/data/k15/train/gt/left
+    dataroot_lq: ../stereo-derain/data/k15/train/input/left
+#    dataroot_gt: data/k15/train/gt/left
+#    dataroot_lq: data/k15/train/input/left
+
+    # 数据增强配置
+    use_hflip: false
+    use_vflip: false
+    use_rot: false
+    flip_RGB: false
+
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+
+    # data loader
+    use_shuffle: true
+    num_worker_per_gpu: 2
+    batch_size_per_gpu: 3
+    mini_batch_sizes: [3]
+    iters: [100000]
+    gt_size: 368
+    gt_sizes: [368]
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+
+  val:
+    - name: KITTI2015
+      type: Dataset_PairedStereoImage
+      dataroot_gt: ../stereo-derain/data/k15/test/gt/left
+      dataroot_lq: ../stereo-derain/data/k15/test/input/left
+      io_backend:
+        type: disk
+      gt_size: 128    # 设置为 ~ 表示全图测试，不再进行中心裁剪
+
+network_g:
+  type: StereoFDIN
+  img_channels: 3
+  mid_channels: 32
+  enc_blk_nums: [2,2,2,2]
+  middle_blk_num: 2
+  dec_blk_nums: [2,2,2,2]
+  enc_blk_fcib_idx: [0,1,2,3]
+
+# path
+path:
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+
+# training settings
+train:
+  total_iter: 100000
+  warmup_iter: -1 # no warm up
+  use_grad_clip: true
+
+  scheduler:
+    type: CosineAnnealingRestartCyclicLR
+    periods: [30000,70000]
+    restart_weights: [1,1]
+    eta_mins: [0.00001,0.00001]
+
+  mixing_augs:
+    mixup: false
+    mixup_beta: 1.2
+    use_identity: true
+
+  optim_g:
+    type: AdamW
+    lr: !!float 1e-3
+    weight_decay: !!float 1e-4
+    betas: [0.9, 0.999]
+
+  pixel_opt:
+    type: L1SSIMLoss
+    loss_weight: 1
+    l1_weight: 0.6
+    ssim_weight: 0.4
+    reduction: mean
+    window_size: 11
+    channel: 3
+
+# validation settings
+val:
+  window_size: 16
+#  val_freq: !!float 1e3
+#  full_val_freq: !!float 5e3     # <-- 完整验证频率: 每 5000 iter 验证列表中的所有数据集
+
+  val_stages: # 分阶段验证逻辑
+    - { start: 0, end: 80000, freq: 2000 }
+    - { start: 80000, end: 100000, freq: 2000 }
+
+  save_img: false
+  rgb2bgr: true
+  use_image: true
+  max_minibatch: 8
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false`
+
+  log_format:
+    "Left":
+      psnr: psnr_left
+      ssim: ssim_left
+    "Right":
+      psnr: psnr_right
+      ssim: ssim_right
+
+# logging settings
+logger:
+  print_freq: 1000
+  save_checkpoint_freq: !!float 1e3
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500

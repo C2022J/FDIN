@@ -1,0 +1,169 @@
+constants:
+  global_scale: &global_scale 4          # 定义超分倍率
+  total_iters:  &train_iters  100000     # 定义总迭代次数
+
+name: FDIN_StereoSR_2x_S12B8_100K_0.00005_flip_RGB_base2x_MSELoss
+model_type: StereoImageCleanModel
+scale: *global_scale      # <--- 引用上面的 scale
+num_gpu: 2
+manual_seed: 100
+
+datasets:
+  train:
+    name: StereoSR_Dataset
+    type: PairedStereoImageDatasetSRPatchs
+    dataroot_gt: ../stereo-derain/data/Flickr1024_Middlebury/train/patches_x2
+    dataroot_lq: ~
+
+    scale: *global_scale
+    io_backend:
+      type: disk
+
+    iters: [ *train_iters ]
+
+    use_hflip: true
+    use_vflip: true
+    use_rot: false
+    flip_RGB: true
+    use_shuffle: true
+
+    num_worker_per_gpu: 4
+    batch_size_per_gpu: 8
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+
+  val:
+    # 列表中的第一个数据集，用于频繁验证
+    - name: KITTI2015
+      type: Dataset_StereoSR_Test
+      dataroot_gt: ../stereo-derain/data/Flickr1024_Middlebury/test/KITTI2015/GT
+      dataroot_lq: ../stereo-derain/data/Flickr1024_Middlebury/test/KITTI2015/lr_x2
+      scale: *global_scale # <--- 引用 scale
+      io_backend:
+        type: disk
+
+    # 后续的数据集，将只在完整验证时使用
+    - name: KITTI2012
+      type: Dataset_StereoSR_Test
+      dataroot_gt: ../stereo-derain/data/Flickr1024_Middlebury/test/KITTI2012/GT
+      dataroot_lq: ../stereo-derain/data/Flickr1024_Middlebury/test/KITTI2012/lr_x2
+      scale: *global_scale
+      io_backend:
+        type: disk
+
+    - name: Middlebury
+      type: Dataset_StereoSR_Test
+      dataroot_gt: ../stereo-derain/data/Flickr1024_Middlebury/test/Middlebury/GT
+      dataroot_lq: ../stereo-derain/data/Flickr1024_Middlebury/test/Middlebury/lr_x2
+      scale: *global_scale
+      io_backend:
+        type: disk
+
+    - name: Flickr1024
+      type: Dataset_StereoSR_Test
+      dataroot_gt: ../stereo-derain/data/Flickr1024_Middlebury/test/Flickr1024/GT
+      dataroot_lq: ../stereo-derain/data/Flickr1024_Middlebury/test/Flickr1024/lr_x2
+      scale: *global_scale
+      io_backend:
+        type: disk
+
+# -----------------------------------------------------------
+# 4. 网络结构
+# -----------------------------------------------------------
+network_g:
+  type: FDINSR
+  img_channels: 3
+  scale: *global_scale    # <--- 引用 scale
+  mid_channels: 64
+  num_stages: 12
+  blocks_per_stage: 8
+
+# -----------------------------------------------------------
+# 5. 路径配置
+# -----------------------------------------------------------
+path:
+  pretrain_network_g: ./experiments/FDIN_StereoSR_2x_S12B8_400K_0.0008_flip_RGB/models/net_g_400000.pth
+  strict_load_g: False
+  resume_state: ~
+
+# -----------------------------------------------------------
+# 6. 训练设置
+# -----------------------------------------------------------
+train:
+  total_iter: *train_iters
+  warmup_iter: -1
+  use_grad_clip: true
+  grad_clip_norm: 1
+
+  scheduler:
+    type: CosineAnnealingRestartCyclicLR
+    periods: [ *train_iters ]
+    restart_weights: [ 1 ]
+    eta_mins: [ 0.000001 ]
+
+  mixing_augs:
+    mixup: false
+    mixup_beta: 1.2
+    use_identity: true
+
+  optim_g:
+    type: AdamW
+    lr: !!float 5e-5
+    weight_decay: !!float 1e-4
+    betas: [0.9, 0.9]
+
+  # losses
+  pixel_opt:
+    type: MSELoss
+    loss_weight: 1
+    reduction: mean
+
+  freq_opt:
+    type: FrequencyCharbonnierLoss
+    loss_weight: 0.1
+    reduction: mean
+    eps: !!float 1e-6
+
+# -----------------------------------------------------------
+# 7. 验证与日志
+# -----------------------------------------------------------
+val:
+  window_size: 0
+  val_freq: !!float 1e3          # 每 1000 iter 验证列表第一个数据集
+  full_val_freq: !!float 1e3     # 每 5000 iter 验证所有数据集
+  save_img: false
+  rgb2bgr: True
+  use_image: True
+  max_minibatch: 8
+
+  metrics:
+    psnr:
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+
+  log_format:
+    "Left":
+      psnr: psnr_left
+      ssim: ssim_left
+    "(Left+Right)/2":
+      psnr: [psnr_left, psnr_right]
+      ssim: [ssim_left, ssim_right]
+
+# logging settings
+logger:
+  print_freq: 1000
+  save_checkpoint_freq: !!float 1e3
+  use_tb_logger: True
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
