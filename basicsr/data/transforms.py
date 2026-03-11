@@ -1,0 +1,548 @@
+import cv2
+import random
+import numpy as np
+
+def mod_crop(img, scale):
+    """Mod crop images, used during testing.
+
+    Args:
+        img (ndarray): Input image.
+        scale (int): Scale factor.
+
+    Returns:
+        ndarray: Result image.
+    """
+    img = img.copy()
+    if img.ndim in (2, 3):
+        h, w = img.shape[0], img.shape[1]
+        h_remainder, w_remainder = h % scale, w % scale
+        img = img[:h - h_remainder, :w - w_remainder, ...]
+    else:
+        raise ValueError(f'Wrong img ndim: {img.ndim}.')
+    return img
+
+def paired_random_crop(img_gts, img_lqs, lq_patch_size, scale, gt_path):
+    """Paired random crop.
+
+    It crops lists of lq and gt images with corresponding locations.
+
+    Args:
+        img_gts (list[ndarray] | ndarray): GT images. Note that all images
+            should have the same shape. If the input is an ndarray, it will
+            be transformed to a list containing itself.
+        img_lqs (list[ndarray] | ndarray): LQ images. Note that all images
+            should have the same shape. If the input is an ndarray, it will
+            be transformed to a list containing itself.
+        lq_patch_size (int): LQ patch size.
+        scale (int): Scale factor.
+        gt_path (str): Path to ground-truth.
+
+    Returns:
+        list[ndarray] | ndarray: GT images and LQ images. If returned results
+            only have one element, just return ndarray.
+    """
+
+    if not isinstance(img_gts, list):
+        img_gts = [img_gts]
+    if not isinstance(img_lqs, list):
+        img_lqs = [img_lqs]
+
+    h_lq, w_lq, _ = img_lqs[0].shape
+    h_gt, w_gt, _ = img_gts[0].shape
+    gt_patch_size = int(lq_patch_size * scale)
+
+    if h_gt != h_lq * scale or w_gt != w_lq * scale:
+        raise ValueError(
+            f'Scale mismatches. GT ({h_gt}, {w_gt}) is not {scale}x ',
+            f'multiplication of LQ ({h_lq}, {w_lq}).')
+    if h_lq < lq_patch_size or w_lq < lq_patch_size:
+        raise ValueError(f'LQ ({h_lq}, {w_lq}) is smaller than patch size '
+                         f'({lq_patch_size}, {lq_patch_size}). '
+                         f'Please remove {gt_path}.')
+
+    # randomly choose top and left coordinates for lq patch
+    top = random.randint(0, h_lq - lq_patch_size)
+    left = random.randint(0, w_lq - lq_patch_size)
+
+    # crop lq patch
+    img_lqs = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqs
+    ]
+
+    # crop corresponding gt patch
+    top_gt, left_gt = int(top * scale), int(left * scale)
+    img_gts = [
+        v[top_gt:top_gt + gt_patch_size, left_gt:left_gt + gt_patch_size, ...]
+        for v in img_gts
+    ]
+    if len(img_gts) == 1:
+        img_gts = img_gts[0]
+    if len(img_lqs) == 1:
+        img_lqs = img_lqs[0]
+    return img_gts, img_lqs
+
+def paired_stereo_random_crop(img_gts_left, img_lqs_left, img_gts_right, img_lqs_right, lq_patch_size, scale, gt_path):
+    if not isinstance(img_gts_left, list):
+        img_gts_left = [img_gts_left]
+    if not isinstance(img_gts_right, list):
+        img_gts_right = [img_gts_right]
+    if not isinstance(img_lqs_left, list):
+        img_lqs_left = [img_lqs_left]
+    if not isinstance(img_lqs_right, list):
+        img_lqs_right = [img_lqs_right]
+    h_lq, w_lq, _ = img_lqs_left[0].shape
+    h_gt, w_gt, _ = img_gts_left[0].shape
+    gt_patch_size = int(lq_patch_size * scale)
+
+    if h_gt != h_lq * scale or w_gt != w_lq * scale:
+        raise ValueError(
+            f'Scale mismatches. GT ({h_gt}, {w_gt}) is not {scale}x ',
+            f'multiplication of LQ ({h_lq}, {w_lq}).')
+    if h_lq < lq_patch_size or w_lq < lq_patch_size:
+        raise ValueError(f'LQ ({h_lq}, {w_lq}) is smaller than patch size '
+                         f'({lq_patch_size}, {lq_patch_size}). '
+                         f'Please remove {gt_path}.')
+
+    # randomly choose top and left coordinates for lq patch
+    top = random.randint(0, h_lq - lq_patch_size)
+    left = random.randint(0, w_lq - lq_patch_size)
+
+    # crop lq patch
+    img_lqs_left = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqs_left]
+
+    img_lqs_right = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqs_right]
+
+    # crop corresponding gt patch
+    top_gt, left_gt = int(top * scale), int(left * scale)
+    img_gts_left = [
+        v[top_gt:top_gt + gt_patch_size, left_gt:left_gt + gt_patch_size, ...]
+        for v in img_gts_left]
+    img_gts_right = [
+        v[top_gt:top_gt + gt_patch_size, left_gt:left_gt + gt_patch_size, ...]
+        for v in img_gts_right]
+
+    if len(img_gts_left) == 1:
+        img_gts_left = img_gts_left[0]
+        img_gts_right = img_gts_right[0]
+    if len(img_lqs_left) == 1:
+        img_lqs_left = img_lqs_left[0]
+        img_lqs_right = img_lqs_right[0]
+    return img_gts_left, img_lqs_left, img_gts_right, img_lqs_right
+
+
+def paired_stereo_center_crop(img_gts_left, img_lqs_left, img_gts_right, img_lqs_right, lq_patch_size, scale):
+    """
+    为 1:1 图像修复任务（或 SR 任务）进行配对的中心裁剪。
+    逻辑与 paired_stereo_random_crop 完全一致，只是将
+    random.randint 替换为中心点计算。
+    """
+
+    # 1. 确保是列表
+    if not isinstance(img_gts_left, list):
+        img_gts_left = [img_gts_left]
+    if not isinstance(img_gts_right, list):
+        img_gts_right = [img_gts_right]
+    if not isinstance(img_lqs_left, list):
+        img_lqs_left = [img_lqs_left]
+    if not isinstance(img_lqs_right, list):
+        img_lqs_right = [img_lqs_right]
+
+    # 2. 获取尺寸
+    h_lq, w_lq, _ = img_lqs_left[0].shape
+    h_gt, w_gt, _ = img_gts_left[0].shape
+    gt_patch_size = int(lq_patch_size * scale)
+
+    # 3. 尺寸检查
+    if h_gt != h_lq * scale or w_gt != w_lq * scale:
+        raise ValueError(
+            f'Scale mismatches. GT ({h_gt}, {w_gt}) is not {scale}x '
+            f'multiplication of LQ ({h_lq}, {w_lq}).')
+    if h_lq < lq_patch_size or w_lq < lq_patch_size:
+        raise ValueError(f'LQ ({h_lq}, {w_lq}) is smaller than patch size '
+                         f'({lq_patch_size}, {lq_patch_size}). '
+                         f'Note: This check happens *after* padding.')
+
+    # 4. 【核心修改】计算 LQ patch 的中心坐标
+    top = (h_lq - lq_patch_size) // 2
+    left = (w_lq - lq_patch_size) // 2
+
+    # 5. 裁剪 LQ patch
+    img_lqs_left = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqs_left]
+    img_lqs_right = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqs_right]
+
+    # 6. 计算并裁剪对应的 GT patch
+    top_gt, left_gt = int(top * scale), int(left * scale)
+    img_gts_left = [
+        v[top_gt:top_gt + gt_patch_size, left_gt:left_gt + gt_patch_size, ...]
+        for v in img_gts_left]
+    img_gts_right = [
+        v[top_gt:top_gt + gt_patch_size, left_gt:left_gt + gt_patch_size, ...]
+        for v in img_gts_right]
+
+    # 7. 如果输入是单个图像，则解除列表
+    if len(img_gts_left) == 1:
+        img_gts_left = img_gts_left[0]
+        img_gts_right = img_gts_right[0]
+    if len(img_lqs_left) == 1:
+        img_lqs_left = img_lqs_left[0]
+        img_lqs_right = img_lqs_right[0]
+
+    return img_gts_left, img_lqs_left, img_gts_right, img_lqs_right
+
+import random
+
+import random
+
+
+def paired_stereo_random_crop_sr(img_gts_left, img_lqs_left, img_gts_right, img_lqs_right, gt_patch_size, scale,
+                                 gt_path):
+    """为立体超分（Stereo SR）任务进行正确的随机裁剪。
+
+    (已改进：确保 GT/LQ 坐标完美对齐，gt_top 始终是 scale 的倍数)
+    """
+
+    # 1. 确保输入是列表（用于多帧）
+    if not isinstance(img_gts_left, list):
+        img_gts_left = [img_gts_left]
+    if not isinstance(img_gts_right, list):
+        img_gts_right = [img_gts_right]
+    if not isinstance(img_lqs_left, list):
+        img_lqs_left = [img_lqs_left]
+    if not isinstance(img_lqs_right, list):
+        img_lqs_right = [img_lqs_right]
+
+    # 2. 获取尺寸
+    h_lq, w_lq, _ = img_lqs_left[0].shape
+    h_gt, w_gt, _ = img_gts_left[0].shape
+
+    # 3. 计算正确的 LQ patch size
+    lq_patch_size = gt_patch_size // scale
+
+    # --- 检查代码 ---
+    if h_gt != h_lq * scale or w_gt != w_lq * scale:
+        raise ValueError(
+            f'Scale mismatches. GT ({h_gt}, {w_gt}) is not {scale}x '
+            f'multiplication of LQ ({h_lq}, {w_lq}). Path: {gt_path}')
+    if h_gt < gt_patch_size or w_gt < gt_patch_size:
+        raise ValueError(f'GT ({h_gt}, {w_gt}) is smaller than gt_patch_size '
+                         f'({gt_patch_size}, {gt_patch_size}). '
+                         f'Please remove {gt_path}.')
+    if h_lq < lq_patch_size or w_lq < lq_patch_size:
+        raise ValueError(f'LQ ({h_lq}, {w_lq}) is smaller than lq_patch_size '
+                         f'({lq_patch_size}, {lq_patch_size}). '
+                         f'Please remove {gt_path}.')
+    # --- 检查结束 ---
+
+    # 4. 【改进】在 LQ 坐标系上计算随机范围
+    # (h_gt - gt_patch_size) 是 GT 图像上允许的最大 top 坐标
+    # (h_gt - gt_patch_size) // scale 是对应的 LQ 图像上允许的最大 top 坐标
+    max_lq_top = (h_gt - gt_patch_size) // scale
+    max_lq_left = (w_gt - gt_patch_size) // scale
+
+    # 在 LQ 范围内随机选择
+    lq_top = random.randint(0, max_lq_top)
+    lq_left = random.randint(0, max_lq_left)
+
+    # 5. 【改进】通过 scale 放大，得到完美对齐的 GT 坐标
+    gt_top = lq_top * scale
+    gt_left = lq_left * scale
+
+    # 6. 裁剪 GT patches
+    img_gts_left = [
+        v[gt_top:gt_top + gt_patch_size, gt_left:gt_left + gt_patch_size, ...]
+        for v in img_gts_left]
+    img_gts_right = [
+        v[gt_top:gt_top + gt_patch_size, gt_left:gt_left + gt_patch_size, ...]
+        for v in img_gts_right]
+
+    # 7. 裁剪 LQ patches
+    img_lqs_left = [
+        v[lq_top:lq_top + lq_patch_size, lq_left:lq_left + lq_patch_size, ...]
+        for v in img_lqs_left]
+    img_lqs_right = [
+        v[lq_top:lq_top + lq_patch_size, lq_left:lq_left + lq_patch_size, ...]
+        for v in img_lqs_right]
+
+    # 8. 如果输入是单个图像，则解除列表
+    if len(img_gts_left) == 1:
+        img_gts_left = img_gts_left[0]
+        img_gts_right = img_gts_right[0]
+    if len(img_lqs_left) == 1:
+        img_lqs_left = img_lqs_left[0]
+        img_lqs_right = img_lqs_right[0]
+
+    return img_gts_left, img_lqs_left, img_gts_right, img_lqs_right
+
+
+import random
+
+
+def paired_stereo_random_crop_sr_rectangular(img_gts_left, img_lqs_left, img_gts_right, img_lqs_right, gt_patch_size,
+                                             scale, gt_path):
+    """
+    paired_stereo_random_crop_sr 的修改版，支持长方形裁剪。
+    假定 gt_patch_size 是一个 [H, W] 格式的列表或元组。
+    """
+    if not isinstance(img_gts_left, list):
+        img_gts_left = [img_gts_left]
+    if not isinstance(img_gts_right, list):
+        img_gts_right = [img_gts_right]
+    if not isinstance(img_lqs_left, list):
+        img_lqs_left = [img_lqs_left]
+    if not isinstance(img_lqs_right, list):
+        img_lqs_right = [img_lqs_right]
+
+    h_lq, w_lq, _ = img_lqs_left[0].shape
+    h_gt, w_gt, _ = img_gts_left[0].shape
+
+    # --- 修改点 1: 解包 H 和 W ---
+    # 假定 gt_patch_size 是 [gt_patch_h, gt_patch_w]
+    gt_patch_h, gt_patch_w = gt_patch_size
+
+    # --- 修改点 2: 分别计算 LQ 的 H 和 W ---
+    lq_patch_h = int(gt_patch_h * scale)
+    lq_patch_w = int(gt_patch_w * scale)
+
+    # (更新了注释中的检查逻辑以匹配 H/W)
+    # if h_gt != h_lq * 2 or w_gt != w_lq * 2:
+    #     raise ValueError(
+    #         f'Scale mismatches. GT ({h_gt}, {w_gt}) is not {scale}x ',
+    #         f'multiplication of LQ ({h_lq}, {w_lq}).')
+    # if h_lq < gt_patch_h or w_lq < gt_patch_w:
+    #     raise ValueError(f'LQ ({h_lq}, {w_lq}) is smaller than patch size '
+    #                      f'({gt_patch_h}, {gt_patch_w}). '
+    #                      f'Please remove {gt_path}.')
+
+    # --- 修改点 3: 分别使用 H 和 W 随机选择 top 和 left ---
+    top = random.randint(0, (h_lq - gt_patch_h) // 2) * 2
+    left = random.randint(0, (w_lq - gt_patch_w) // 2) * 2
+
+    # --- 修改点 4: 裁剪 GT patch 时分别使用 H 和 W ---
+    img_gts_left = [
+        v[top:top + gt_patch_h, left:left + gt_patch_w, ...]
+        for v in img_gts_left]
+
+    img_gts_right = [
+        v[top:top + gt_patch_h, left:left + gt_patch_w, ...]
+        for v in img_gts_right]
+
+    # crop corresponding lq patch
+    top_lq, left_lq = int(top // 2), int(left // 2)
+
+    # --- 修改点 5: 裁剪 LQ patch 时分别使用 H 和 W ---
+    img_lqs_left = [
+        v[top_lq:top_lq + lq_patch_h // 2, left_lq:left_lq + lq_patch_w // 2, ...]
+        for v in img_lqs_left]
+    img_lqs_right = [
+        v[top_lq:top_lq + lq_patch_h // 2, left_lq:left_lq + lq_patch_w // 2, ...]
+        for v in img_lqs_right]
+
+    if len(img_gts_left) == 1:
+        img_gts_left = img_gts_left[0]
+        img_gts_right = img_gts_right[0]
+    if len(img_lqs_left) == 1:
+        img_lqs_left = img_lqs_left[0]
+        img_lqs_right = img_lqs_right[0]
+
+    return img_gts_left, img_lqs_left, img_gts_right, img_lqs_right
+
+def paired_random_crop_DP(img_lqLs, img_lqRs, img_gts, gt_patch_size, scale, gt_path):
+    if not isinstance(img_gts, list):
+        img_gts = [img_gts]
+    if not isinstance(img_lqLs, list):
+        img_lqLs = [img_lqLs]
+    if not isinstance(img_lqRs, list):
+        img_lqRs = [img_lqRs]
+
+    h_lq, w_lq, _ = img_lqLs[0].shape
+    h_gt, w_gt, _ = img_gts[0].shape
+    lq_patch_size = gt_patch_size // scale
+
+    if h_gt != h_lq * scale or w_gt != w_lq * scale:
+        raise ValueError(
+            f'Scale mismatches. GT ({h_gt}, {w_gt}) is not {scale}x ',
+            f'multiplication of LQ ({h_lq}, {w_lq}).')
+    if h_lq < lq_patch_size or w_lq < lq_patch_size:
+        raise ValueError(f'LQ ({h_lq}, {w_lq}) is smaller than patch size '
+                         f'({lq_patch_size}, {lq_patch_size}). '
+                         f'Please remove {gt_path}.')
+
+    # randomly choose top and left coordinates for lq patch
+    top = random.randint(0, h_lq - lq_patch_size)
+    left = random.randint(0, w_lq - lq_patch_size)
+
+    # crop lq patch
+    img_lqLs = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqLs
+    ]
+
+    img_lqRs = [
+        v[top:top + lq_patch_size, left:left + lq_patch_size, ...]
+        for v in img_lqRs
+    ]
+
+    # crop corresponding gt patch
+    top_gt, left_gt = int(top * scale), int(left * scale)
+    img_gts = [
+        v[top_gt:top_gt + gt_patch_size, left_gt:left_gt + gt_patch_size, ...]
+        for v in img_gts
+    ]
+    if len(img_gts) == 1:
+        img_gts = img_gts[0]
+    if len(img_lqLs) == 1:
+        img_lqLs = img_lqLs[0]
+    if len(img_lqRs) == 1:
+        img_lqRs = img_lqRs[0]
+    return img_lqLs, img_lqRs, img_gts
+
+
+def augment(imgs, hflip=True, rotation=True, flows=None, return_status=False):
+    """Augment: horizontal flips OR rotate (0, 90, 180, 270 degrees).
+
+    We use vertical flip and transpose for rotation implementation.
+    All the images in the list use the same augmentation.
+
+    Args:
+        imgs (list[ndarray] | ndarray): Images to be augmented. If the input
+            is an ndarray, it will be transformed to a list.
+        hflip (bool): Horizontal flip. Default: True.
+        rotation (bool): Ratotation. Default: True.
+        flows (list[ndarray]: Flows to be augmented. If the input is an
+            ndarray, it will be transformed to a list.
+            Dimension is (h, w, 2). Default: None.
+        return_status (bool): Return the status of flip and rotation.
+            Default: False.
+
+    Returns:
+        list[ndarray] | ndarray: Augmented images and flows. If returned
+            results only have one element, just return ndarray.
+
+    """
+    hflip = hflip and random.random() < 0.5
+    vflip = rotation and random.random() < 0.5
+    rot90 = rotation and random.random() < 0.5
+
+    def _augment(img):
+        if hflip:  # horizontal
+            cv2.flip(img, 1, img)
+        if vflip:  # vertical
+            cv2.flip(img, 0, img)
+        if rot90:
+            img = img.transpose(1, 0, 2)
+        return img
+
+    def _augment_flow(flow):
+        if hflip:  # horizontal
+            cv2.flip(flow, 1, flow)
+            flow[:, :, 0] *= -1
+        if vflip:  # vertical
+            cv2.flip(flow, 0, flow)
+            flow[:, :, 1] *= -1
+        if rot90:
+            flow = flow.transpose(1, 0, 2)
+            flow = flow[:, :, [1, 0]]
+        return flow
+
+    if not isinstance(imgs, list):
+        imgs = [imgs]
+    imgs = [_augment(img) for img in imgs]
+    if len(imgs) == 1:
+        imgs = imgs[0]
+
+    if flows is not None:
+        if not isinstance(flows, list):
+            flows = [flows]
+        flows = [_augment_flow(flow) for flow in flows]
+        if len(flows) == 1:
+            flows = flows[0]
+        return imgs, flows
+    else:
+        if return_status:
+            return imgs, (hflip, vflip, rot90)
+        else:
+            return imgs
+
+
+def img_rotate(img, angle, center=None, scale=1.0):
+    """Rotate image.
+
+    Args:
+        img (ndarray): Image to be rotated.
+        angle (float): Rotation angle in degrees. Positive values mean
+            counter-clockwise rotation.
+        center (tuple[int]): Rotation center. If the center is None,
+            initialize it as the center of the image. Default: None.
+        scale (float): Isotropic scale factor. Default: 1.0.
+    """
+    (h, w) = img.shape[:2]
+
+    if center is None:
+        center = (w // 2, h // 2)
+
+    matrix = cv2.getRotationMatrix2D(center, angle, scale)
+    rotated_img = cv2.warpAffine(img, matrix, (w, h))
+    return rotated_img
+
+def data_augmentation(image, mode):
+    """
+    Performs data augmentation of the input image
+    Input:
+        image: a cv2 (OpenCV) image
+        mode: int. Choice of transformation to apply to the image
+                0 - no transformation
+                1 - flip up and down
+                2 - rotate counterwise 90 degree
+                3 - rotate 90 degree and flip up and down
+                4 - rotate 180 degree
+                5 - rotate 180 degree and flip
+                6 - rotate 270 degree
+                7 - rotate 270 degree and flip
+    """
+    if mode == 0:
+        # original
+        out = image
+    elif mode == 1:
+        # flip up and down
+        out = np.flipud(image)
+    elif mode == 2:
+        # rotate counterwise 90 degree
+        out = np.rot90(image)
+    elif mode == 3:
+        # rotate 90 degree and flip up and down
+        out = np.rot90(image)
+        out = np.flipud(out)
+    elif mode == 4:
+        # rotate 180 degree
+        out = np.rot90(image, k=2)
+    elif mode == 5:
+        # rotate 180 degree and flip
+        out = np.rot90(image, k=2)
+        out = np.flipud(out)
+    elif mode == 6:
+        # rotate 270 degree
+        out = np.rot90(image, k=3)
+    elif mode == 7:
+        # rotate 270 degree and flip
+        out = np.rot90(image, k=3)
+        out = np.flipud(out)
+    else:
+        raise Exception('Invalid choice of image transformation')
+
+    return out
+
+def random_augmentation(*args):
+    out = []
+    flag_aug = random.randint(0,7)
+    for data in args:
+        out.append(data_augmentation(data, flag_aug).copy())
+    return out
